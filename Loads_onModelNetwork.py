@@ -45,56 +45,26 @@ LinkSequence = h.GetMulti(Visum.Net.LineRoutes, "Concatenate:Links\No")
 FromNodeSeq = h.GetMulti(Visum.Net.LineRoutes, "Concatenate:Links\FromNodeNo")
 ToNodeSeq = h.GetMulti(Visum.Net.LineRoutes, "Concatenate:Links\ToNodeNo")
 
-#get stop point attributes
-spid = h.GetMulti(Visum.Net.StopPoints, "No")
-GTFSid = h.GetMulti(Visum.Net.StopPoints, "GTFS_STOP_ID")
-spcode = h.GetMulti(Visum.Net.StopPoints, "Code")
-spname = h.GetMulti(Visum.Net.StopPoints, "Name")
-onlink = h.GetMulti(Visum.Net.StopPoints, "IsOnLink")
-linkno = h.GetMulti(Visum.Net.StopPoints, "LinkNo")
-fromnode = h.GetMulti(Visum.Net.StopPoints, "FromNodeNo")
-tonode = h.GetMulti(Visum.Net.StopPoints, "Distinct:Links\ToNodeNo")
-numlines = h.GetMulti(Visum.Net.StopPoints, "NumLines")
-linenames = h.GetMulti(Visum.Net.StopPoints, "Distinct:LineRoutes\LineName")
-lrid_served = h.GetMulti(Visum.Net.StopPoints, "Distinct:LineRoutes\ID")
-
-#convert sequence lists to arrays
+#split into arrays
 AGTFSidSeq = []
 for i in xrange(0, len(GTFSidSeq)):
-    AGTFSidSeq.append(numpy.array(GTFSidSeq[i].encode('ascii')))
+    AGTFSidSeq.append(GTFSidSeq[i].split(','))
     
 AStopSequence = []
 for i in xrange(0, len(StopSequence)):
-    AStopSequence.append(numpy.array(StopSequence[i].encode('ascii')))
+    AStopSequence.append(StopSequence[i].split(','))
     
 ALinkSequence = []
 for i in xrange(0, len(LinkSequence)):
-    ALinkSequence.append(numpy.array(LinkSequence[i].encode('ascii')))
+    ALinkSequence.append(LinkSequence[i].split(','))
     
 AFromNodeSeq = []
 for i in xrange(0, len(FromNodeSeq)):
-    AFromNodeSeq.append(numpy.array(FromNodeSeq[i].encode('ascii')))
+    AFromNodeSeq.append(FromNodeSeq[i].split(','))
     
 AToNodeSeq = []
 for i in xrange(0, len(ToNodeSeq)):
-    AToNodeSeq.append(numpy.array(ToNodeSeq[i].encode('ascii')))
-
-#convert other unicode values to regular values
-Rtsys = []
-for i in xrange(0, len(tsys)):
-        Rtsys.append(tsys[i].encode('ascii'))
-
-Rlinename = []
-for i in xrange(0, len(linename)):
-        Rlinename.append(linename[i].encode('ascii'))
-
-Rlrname = []
-for i in xrange(0, len(lrname)):
-        Rlrname.append(lrname[i].encode('ascii'))
-
-Rdirection = []
-for i in xrange(0, len(direction)):
-        Rdirection.append(direction[i].encode('ascii'))
+    AToNodeSeq.append(ToNodeSeq[i].split(','))
         
 #convert floats to integers
 Ilrid = []
@@ -112,7 +82,8 @@ for i in xrange(0, len(NumVehJour)):
 INumLinks = []
 for i in xrange(0, len(NumLinks)):
     INumLinks.append(int(NumLinks[i]))
-    
+
+#create table for line routes
 Q_CreateLRIDTable = """
 CREATE TABLE IF NOT EXISTS public.lineroutes
 (
@@ -139,21 +110,8 @@ COMMIT;"""
 
 cur.execute(Q_CreateLRIDTable)
 
-########################this is where things get crazy - lots of testing and things that don't work#############################
-str_rpl = "(%s)" % (",".join("%s" for _ in xrange(len(Ilrid))))
-#cur.execute("""BEGIN TRANSACTION;""")
-batch_size = 10000
-for i in xrange(0, len(Ilrid), batch_size):
-    j = i+batch_size
-    arg_str = ','.join(str_rpl % tuple(map(str, x)) for x in Ilrid[i:j])
-    print arg_str
-    #Q_Insert = """INSERT INTO public.lineroutes VALUES {0}""".format(arg_str)
-    #cur.execute(Q_Insert)
-#cur.execute("""COMMIT;""")
-
-
 tester = []
-for i in xrange(0, 5):
+for i in xrange(0, len(Ilrid)):
         a = []
         a.append(Ilrid[i])
         a.append(Rtsys[i])
@@ -171,37 +129,127 @@ for i in xrange(0, 5):
         a.append(AToNodeSeq[i])
         tester.append(a)
         
-for i in xrange(0,5):
-    cur.execute(
-        """
-        INSERT INTO public.lineroutes
-        VALUES {0};
-        """.format(tester[i]))
-cur.execute("""COMMIT;""")
+for i in xrange(0, len(tester)):
+    cur.execute(cur.mogrify("INSERT INTO public.lineroutes VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)", tester[i]))
+con.commit()
 
 
-#create data frames to insert
-lr_df = pd.DataFrame(
-    {'lrid': lrid, 
-     'tsys' : tsys,
-     'linename' : linename,
-     'lrname' : lrname,
-     'direction' : direction,
-     'length' : length,
-     'StopsServed ' : StopsServed,
-     'NumVehJour' : NumVehJour,
-     'StopSequence' : AStopSequence,
-     'GTFSidSeq' : AGTFSidSeq,
-     'NumLinks' : NumLinks,
-     'LinkSequence' : ALinkSequence,
-     'FromNodeSeq ' : AFromNodeSeq,
-     'ToNodeSeq ' : AToNodeSeq
-    })
+
+###REPEAT FOR STOP POINTS###
+
+#get stop point attributes
+spid = h.GetMulti(Visum.Net.StopPoints, "No")
+GTFSid = h.GetMulti(Visum.Net.StopPoints, "GTFS_STOP_ID")
+spcode = h.GetMulti(Visum.Net.StopPoints, "Code")
+spname = h.GetMulti(Visum.Net.StopPoints, "Name")
+onlink = h.GetMulti(Visum.Net.StopPoints, "IsOnLink")
+linkno = h.GetMulti(Visum.Net.StopPoints, "LinkNo")
+fromnode = h.GetMulti(Visum.Net.StopPoints, "FromNodeNo")
+tonode = h.GetMulti(Visum.Net.StopPoints, "Distinct:Links\ToNodeNo")
+numlines = h.GetMulti(Visum.Net.StopPoints, "NumLines")
+linenames = h.GetMulti(Visum.Net.StopPoints, "Distinct:LineRoutes\LineName")
+lrid_served = h.GetMulti(Visum.Net.StopPoints, "Distinct:LineRoutes\ID")
+
+
+#replace null values with 0
+for i in xrange(0, len(GTFSid)):
+    if GTFSid[i] == None:
+        GTFSid[i] = 0
+        
+for i in xrange(0, len(linkno)):
+    if linkno[i] == None:
+        linkno[i] = 0
+        
+for i in xrange(0, len(fromnode)):
+    if fromnode[i] == None:
+        fromnode[i] = 0        
+
+#split into arrays
+Alinenames = []
+for i in xrange(0, len(linenames)):
+    Alinenames.append(linenames[i].split(','))
     
-lr_47 = lr_df[lr_df.linename == '47']
-lr_47
+Alrid_served = []
+for i in xrange(0, len(lrid_served)):
+    Alrid_served.append(lrid_served[i].split(','))
+    
+Atonode = []
+for i in xrange(0, len(tonode)):
+    Atonode.append(tonode[i].split(','))
+    
+#convert floats to integers
+Ispid = []
+for i in xrange(0, len(spid)):
+    Ispid.append(int(spid[i]))
 
-#drop df into postgres db
-from sqlalchemy import create_engine
-engine = create_engine('postgresql://postgres:sergt@localhost:5432/GTFS')
-lr_47.to_sql('lr47', engine, chunksize = 10000)
+IGTFSid = []
+for i in xrange(0, len(GTFSid)):
+    IGTFSid.append(int(GTFSid[i]))
+
+Ionlink= []
+for i in xrange(0, len(onlink)):
+    Ionlink.append(int(onlink[i]))
+
+Ilinkno = []
+for i in xrange(0, len(linkno)):
+    Ilinkno.append(int(linkno[i]))
+    
+Ifromnode = []
+for i in xrange(0, len(fromnode)):
+    Ifromnode.append(int(fromnode[i]))
+    
+#Itonode = []
+#for i in xrange(0, len(tonode)):
+#    Itonode.append(int(tonode[i]))
+    
+Inumlines = []
+for i in xrange(0, len(numlines)):
+    Inumlines.append(int(numlines[i]))
+
+
+#create table for line routes
+Q_CreateSPTable = """
+CREATE TABLE IF NOT EXISTS public.stoppoints
+(
+    spid integer,
+    GTFSid integer,
+    spcode text,
+    spname text,
+    onlink text,
+    linkno integer,
+    fromonode integer,
+    tonode integer,
+    numlines integer,
+    linenames text[],
+    lrid_served text[]
+)
+WITH (
+    OIDS = FALSE
+)
+TABLESPACE pg_default;
+COMMIT;"""
+
+cur.execute(Q_CreateSPTable)
+
+tester = []
+for i in xrange(0, len(Ilrid)):
+        a = []
+        a.append(Ispid[i])
+        a.append(IGTFSid[i])
+        a.append(spcode[i])
+        a.append(spname[i])
+        a.append(Ionlink[i])
+        a.append(Ilinkno[i])
+        a.append(Ifromnode[i])
+        a.append(tonode[i])
+        a.append(Inumlines[i])
+        a.append(Alinenames[i])
+        a.append(Alrid_served[i])
+        tester.append(a)
+        
+for i in xrange(0, len(tester)):
+    cur.execute(cur.mogrify("INSERT INTO public.stoppoints VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)", tester[i]))
+con.commit()
+
+
+
