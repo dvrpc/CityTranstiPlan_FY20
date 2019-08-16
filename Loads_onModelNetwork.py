@@ -24,7 +24,7 @@ model = r"\\peach\Modeling\Base_Model_Repository\TIM 2.3.1 v2 Feb_2019\Completed
 Visum.LoadVersion(model)
 
 #view max length for concatenated values
-Visum.Net.AttValue("ConcatMaxLen")
+print Visum.Net.AttValue("ConcatMaxLen")
 
 #extend max length for contatenated values
 Visum.Net.SetAttValue("ConcatMaxLen", 32768)
@@ -232,7 +232,7 @@ COMMIT;"""
 cur.execute(Q_CreateSPTable)
 
 tester = []
-for i in xrange(0, len(Ilrid)):
+for i in xrange(0, len(Ispid)):
         a = []
         a.append(Ispid[i])
         a.append(IGTFSid[i])
