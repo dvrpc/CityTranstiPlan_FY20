@@ -1,3 +1,7 @@
+--this is script 2, which calls for script 3 to be run in the middle
+--this script assigns loads to model links in sql
+
+--messing
 WITH tblA AS(
 SELECT lrid, tsys, UNNEST(fromnodeseq) AS fromn, UNNEST(tonodeseq) AS ton
 FROM lineroutes
@@ -42,7 +46,6 @@ CREATE TABLE lineroutes_linkseq AS(
     FROM lineroutes_unnest
     );
 COMMIT;
---create a table from this??
 
 --also need to split out LR GTFSid seq and create rank column too
 CREATE TABLE lineroutes_unnest_gtfs AS(
@@ -73,17 +76,7 @@ CREATE TABLE lineroutes_gtfs AS(
     );
 COMMIT;
 
-
-
----------------------join to line routes/linkseq
-
---can't unnest stop sequence and GTFSID at the same time as the from/to nodes
---use stoppoints table (and sequence_loads) to line GTFSid up with ridership data and link the stop is on
---then find the links between and assign the same ridership/load values
-
-
-
--- need to also deal with dividing ridership by line routes/vehicle journeys (evenly to start)
+-- divide ridership across line routes by number of vehicle journeys (evenly to start)
 CREATE TABLE lrid_portions AS(
 	WITH tblA AS(
 		SELECT 
@@ -112,8 +105,9 @@ CREATE TABLE lrid_portions AS(
 	);
 COMMIT;
 
---get stoppoints ready to join to line route links with fromto field
+--get stoppoints ready to join to line route links with fromto field 
 --first manually updated 7 recrods; tonode field had 2 values. In each case, one was a repeat of the fromnode, so it was removed.
+--then line up stop points with links they are on and the portion of the passenger load they should receive
 WITH tblA AS(
 	SELECT spid, gtfsid, linkno, CONCAT(fromonode, CAST(tonode AS numeric)) AS fromto
 	FROM stoppoints
@@ -191,46 +185,108 @@ CREATE TABLE linkseq_cleanloads AS(
 	);
 COMMIT;
 
---now assign loads to links between stop points
---easiest way after talking to Will is to pull the table in to python and drop down the values
---for each row, read the value (if 1 is null, makeit zero first) and hold it
---look at the next row, if it's null, replace null with the held value. if it's not null, adopt the new value as the holder to carry forward.
+--now assign loads to links between stop points in Python
+--using script: fill_in_linkloads.py
 
 ---AFTER PYTHON
+--summarize and join to geometries to view
+--line level results
+CREATE TABLE loaded_links_linelevel AS(
+    WITH tblA AS(
+        SELECT 
+            no,
+            CONCAT(CAST(fromnodeno AS text), CAST(tonodeno AS text)) AS fromto,
+            r_no,
+            CONCAT(CAST("r_fromno~1" AS text), CAST(r_tonodeno AS text)) AS r_fromto,
+            geom
+        FROM "2015base_link"
+        ),
+    tblB AS(
+        SELECT
+            lrid,
+            tsys,
+            linename,
+            direction,
+            stopsserved,
+            numvehjour,
+            fromto,
+            COUNT(fromto) AS times_used,
+            SUM(CAST(load_portion_avg AS numeric)) AS total_load
+        FROM loaded_links
+        WHERE tsys = 'Bus'
+        OR tsys = 'Trl'
+        OR tsys = 'LRT'
+        GROUP BY lrid, tsys, linename, direction, stopsserved, numvehjour, fromto
+        ),
+    tblC AS(
+        SELECT
+            b.*,
+            a.geom,
+            aa.geom AS geom2
+        FROM tblB b
+        LEFT JOIN tblA a
+        ON b.fromto = a.fromto
+        LEFT JOIN tblA aa
+        ON b.fromto = aa.r_fromto
+    )
+    SELECT
+        lrid,
+        tsys,
+        linename,
+        direction,
+        stopsserved,
+        numvehjour,
+        fromto,
+        times_used,
+        ROUND(total_load, 0),
+        CASE WHEN geom IS NULL THEN geom2
+            ELSE geom
+            END
+            AS geometry
+    FROM tblC);
+COMMIT;
 
----this gives total load by line
---will need to aggregate further and loose line identifiers to get total loads by link
---will be good to have both!!!!!
-WITH tblA AS(
-	SELECT 
-		no,
-		CONCAT(CAST(fromnodeno AS text), CAST(tonodeno AS text)) AS fromto,
-		r_no,
-		CONCAT(CAST("r_fromno~1" AS text), CAST(r_tonodeno AS text)) AS r_fromto,
-		geom
-	FROM "2015base_link"
-	),
-tblB AS(
-	SELECT
-		lrid,
-		tsys,
-		linename,
-		direction,
-		stopsserved,
-		numvehjour,
-		fromto,
-		COUNT(fromto) AS times_used,
-		SUM(CAST(load_portion_avg AS numeric)) AS total_load
-	FROM loaded_links
-	WHERE tsys = 'Bus'
-	GROUP BY lrid, tsys, linename, direction, stopsserved, numvehjour, fromto
-	)
-SELECT
-	b.*,
-	a.geom,
-	aa.geom AS geom2
-FROM tblB b
-LEFT JOIN tblA a
-ON b.fromto = a.fromto
-LEFT JOIN tblA aa
-ON b.fromto = aa.r_fromto
+--aggregate further (and loose line level attributes) for segment level totals
+
+CREATE TABLE loaded_links_segmentlevel AS(
+    WITH tblA AS(
+        SELECT 
+            no,
+            CONCAT(CAST(fromnodeno AS text), CAST(tonodeno AS text)) AS fromto,
+            r_no,
+            CONCAT(CAST("r_fromno~1" AS text), CAST(r_tonodeno AS text)) AS r_fromto,
+            geom
+        FROM "2015base_link"
+        ),
+    tblB AS(
+        SELECT
+            fromto,
+            COUNT(fromto) AS times_used,
+            SUM(CAST(load_portion_avg AS numeric)) AS total_load
+        FROM loaded_links
+        WHERE tsys = 'Bus'
+        OR tsys = 'Trl'
+        OR tsys = 'LRT'
+        GROUP BY fromto
+        ),
+    tblC AS(
+        SELECT
+            b.*,
+            a.geom,
+            aa.geom AS geom2
+        FROM tblB b
+        LEFT JOIN tblA a
+        ON b.fromto = a.fromto
+        LEFT JOIN tblA aa
+        ON b.fromto = aa.r_fromto
+    )
+    SELECT
+        fromto,
+        times_used,
+        ROUND(total_load,0),
+        CASE WHEN geom IS NULL THEN geom2
+            ELSE geom
+            END
+            AS geometry
+    FROM tblC);
+COMMIT;

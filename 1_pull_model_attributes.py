@@ -1,3 +1,5 @@
+#this is script 1 - use this to pull data from the model to put into postgres db
+
 import numpy
 import os
 import csv
