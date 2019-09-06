@@ -105,6 +105,8 @@ CREATE TABLE lrid_portions AS(
 	);
 COMMIT;
 
+------------------------------------ABOVE HERE ALREADY INCLUDES ALL RAIL---------------------------------------------------------------------
+
 --get stoppoints ready to join to line route links with fromto field 
 --first manually updated 7 recrods; tonode field had 2 values. In each case, one was a repeat of the fromnode, so it was removed.
 --then line up stop points with links they are on and the portion of the passenger load they should receive
