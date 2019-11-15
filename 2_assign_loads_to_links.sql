@@ -110,54 +110,57 @@ COMMIT;
 --get stoppoints ready to join to line route links with fromto field 
 --first manually updated 7 recrods; tonode field had 2 values. In each case, one was a repeat of the fromnode, so it was removed.
 --then line up stop points with links they are on and the portion of the passenger load they should receive
-WITH tblA AS(
-	SELECT spid, gtfsid, linkno, CONCAT(fromonode, CAST(tonode AS numeric)) AS fromto
-	FROM stoppoints
-	WHERE gtfsid <> 0
-	),
-tblB AS(
-	SELECT 
-		l.*,
-		p.portion
-	FROM lineroutes_linkseq l
-	INNER JOIN lrid_portions p
-	ON l.lrid = p.lrid
-	),
-tblC AS(
-	SELECT
-		l.lrid,
-		l.tsys,
-		l.linename,
-		l.lrname,
-		l.direction,
-		l.stopsserved,
-		l.numvehjour,
-		l.fromto,
-		l.lrseq,
-		l.portion,
-		a.spid, 
-		a.gtfsid,
-		a.linkno
-	FROM tblB l
-	LEFT JOIN tblA a
-	ON a.fromto = l.fromto
-	ORDER BY lrid, lrseq
-	),
-tblD AS(
-	SELECT *
-	FROM surfacetransit_loads
-	WHERE weekday_lo > 0
-	)
-SELECT
-	c.*,
-	d.weekday_lo,
-	(d.weekday_lo*c.portion) AS load_portion
-FROM tblC c
-LEFT JOIN tblD d
-ON c.gtfsid = d.stop_id
-AND c.linename = d.route
-WHERE c.lrname LIKE 'sepb%'
-ORDER BY lrid, lrseq
+CREATE TABLE linkseq_withloads AS(
+    WITH tblA AS(
+        SELECT spid, gtfsid, linkno, CONCAT(fromonode, CAST(tonode AS numeric)) AS fromto
+        FROM stoppoints
+        WHERE gtfsid <> 0
+        ),
+    tblB AS(
+        SELECT 
+            l.*,
+            p.portion
+        FROM lineroutes_linkseq l
+        INNER JOIN lrid_portions p
+        ON l.lrid = p.lrid
+        ),
+    tblC AS(
+        SELECT
+            l.lrid,
+            l.tsys,
+            l.linename,
+            l.lrname,
+            l.direction,
+            l.stopsserved,
+            l.numvehjour,
+            l.fromto,
+            l.lrseq,
+            l.portion,
+            a.spid, 
+            a.gtfsid,
+            a.linkno
+        FROM tblB l
+        LEFT JOIN tblA a
+        ON a.fromto = l.fromto
+        ORDER BY lrid, lrseq
+        ),
+    tblD AS(
+        SELECT *
+        FROM surfacetransit_loads
+        WHERE weekday_lo > 0
+        )
+    SELECT
+        c.*,
+        d.weekday_lo,
+        (d.weekday_lo*c.portion) AS load_portion
+    FROM tblC c
+    LEFT JOIN tblD d
+    ON c.gtfsid = d.stop_id
+    AND c.linename = d.route
+    WHERE c.lrname LIKE 'sepb%'
+    ORDER BY lrid, lrseq
+    );
+COMMIT;
 
 --Assumption: ridership distributed across line routes by number of vehicle journeys
 --Assumption: if more than one stop is on a link (sometimes up to 6), the load is averaged - it is usually very similar
