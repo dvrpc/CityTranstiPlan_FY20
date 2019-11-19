@@ -8,7 +8,6 @@ import pandas as pd
 import psycopg2 as psql 
 import sys
 import itertools
-import numpy
 import time
 
 #connect to SQL DB in python
@@ -18,7 +17,7 @@ cur = con.cursor()
 
 cur.execute("""
     SELECT *
-    FROM linkseq_cleanloads
+    FROM linkseq_cleanloads_new
     ORDER BY lrid, lrseq
     """)
 loads = cur.fetchall()
@@ -39,7 +38,7 @@ for i in xrange(0, len(loads_list)):
             loads_list[i][9] = 0
             
 #testing
-#test that it got all of them
+#test that it got all of them (should equal 0)
 counter = 0
 for i in xrange(0, len(loads_list)):
     if loads_list[i][7] == 1:
@@ -79,5 +78,5 @@ df.columns=['lrid',
 #add to sql db
 from sqlalchemy import create_engine
 engine = create_engine('postgresql://postgres:sergt@localhost:5432/GTFS')
-df.to_sql('loaded_links', engine, chunksize = 10000)
+df.to_sql('loaded_links_new', engine, chunksize = 10000)
 

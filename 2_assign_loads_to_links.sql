@@ -107,10 +107,63 @@ COMMIT;
 
 ------------------------------------ABOVE HERE ALREADY INCLUDES ALL RAIL---------------------------------------------------------------------
 
+--update concatenated text tonode fields to allow for future joining
+--in each case, one of the values was the same as the from node, so the tonode value was replaced with the remaining value
+--first update for where the fromnode matches the 2nd value in the concatenated tonode
+WITH tblA AS(
+	SELECT 
+		spid,
+		gtfsid,
+		spname,
+		fromonode,
+		tonode,
+		SPLIT_PART(tonode, ',', 1) as tn1,
+		SPLIT_PART(tonode, ',', 2) as tn2
+	FROM stoppoints
+	WHERE tonode LIKE '%,%'
+	ORDER by fromonode DESC
+	),
+tblB AS(
+	SELECT *
+	FROM tblA
+	WHERE fromonode = CAST(tn1 AS numeric)
+	OR fromonode = CAST(tn2 AS numeric)
+	)
+UPDATE stoppoints
+SET tonode = tn1
+FROM tblA
+WHERE stoppoints.fromonode = CAST(tblA.tn2 AS numeric)
+
+--then update for where the fromnode matches the 1st value in the concatenated tonode
+WITH tblA AS(
+	SELECT 
+		spid,
+		gtfsid,
+		spname,
+		fromonode,
+		tonode,
+		SPLIT_PART(tonode, ',', 1) as tn1,
+		SPLIT_PART(tonode, ',', 2) as tn2
+	FROM stoppoints
+	WHERE tonode LIKE '%,%'
+	ORDER by fromonode DESC
+	),
+tblB AS(
+	SELECT *
+	FROM tblA
+	WHERE fromonode = CAST(tn1 AS numeric)
+	OR fromonode = CAST(tn2 AS numeric)
+	)
+UPDATE stoppoints
+SET tonode = tn2
+FROM tblA
+WHERE stoppoints.fromonode = CAST(tblA.tn1 AS numeric)
+
+
 --get stoppoints ready to join to line route links with fromto field 
 --first manually updated 7 recrods; tonode field had 2 values. In each case, one was a repeat of the fromnode, so it was removed.
 --then line up stop points with links they are on and the portion of the passenger load they should receive
-CREATE TABLE linkseq_withloads AS(
+CREATE TABLE linkseq_withloads_bus AS(
     WITH tblA AS(
         SELECT spid, gtfsid, linkno, CONCAT(fromonode, CAST(tonode AS numeric)) AS fromto
         FROM stoppoints
@@ -142,6 +195,8 @@ CREATE TABLE linkseq_withloads AS(
         FROM tblB l
         LEFT JOIN tblA a
         ON a.fromto = l.fromto
+        --for buses only (will repeat later for trolleys)
+        WHERE l.tsys = 'Bus'
         ORDER BY lrid, lrseq
         ),
     tblD AS(
@@ -162,16 +217,81 @@ CREATE TABLE linkseq_withloads AS(
     );
 COMMIT;
 
+--repeating above for Trolleys
+CREATE TABLE linkseq_withloads_trl AS(
+    WITH tblA AS(
+        SELECT spid, gtfsid, linkno, CONCAT(fromonode, CAST(tonode AS numeric)) AS fromto
+        FROM stoppoints
+        ),
+    tblB AS(
+        SELECT 
+            l.*,
+            p.portion
+        FROM lineroutes_linkseq l
+        INNER JOIN lrid_portions p
+        ON l.lrid = p.lrid
+        ),
+    tblC AS(
+        SELECT
+            l.lrid,
+            l.tsys,
+            l.linename,
+            l.lrname,
+            l.direction,
+            l.stopsserved,
+            l.numvehjour,
+            l.fromto,
+            l.lrseq,
+            l.portion,
+            a.spid, 
+            a.gtfsid,
+            a.linkno
+        FROM tblB l
+        LEFT JOIN tblA a
+        ON a.fromto = l.fromto
+        --for trolleys only
+        WHERE l.tsys = 'Trl' OR l.tsys = 'LRT'
+        ORDER BY lrid, lrseq
+        ),
+    tblD AS(
+        SELECT *
+        FROM surfacetransit_loads
+        WHERE weekday_lo > 0
+        )
+    SELECT
+        c.*,
+        d.weekday_lo,
+        (d.weekday_lo*c.portion) AS load_portion
+    FROM tblC c
+    LEFT JOIN tblD d
+    ON c.spid = (d.stop_id + 100000)
+    AND c.linename = d.route
+    WHERE c.lrname LIKE 'sepb%'
+    ORDER BY lrid, lrseq
+    );
+COMMIT;
+
+CREATE TABLE linkseq_withloads_new AS(
+    SELECT *
+    FROM linkseq_withloads_bus
+    UNION ALL
+    SELECT *
+    FROM linkseq_withloads_trl
+    );
+COMMIT;
+
 --Assumption: ridership distributed across line routes by number of vehicle journeys
 --Assumption: if more than one stop is on a link (sometimes up to 6), the load is averaged - it is usually very similar
 
 
 --clean up repeats from links that have multiple stops (average loads)
 --requires losing detail on gtfsid, but can always get it from the previous table
-CREATE TABLE linkseq_cleanloads AS(
+CREATE TABLE linkseq_cleanloads_new AS(
+--CREATE TABLE linkseq_cleanloads AS(
 	WITH tblA AS(
 		SELECT lrid, tsys, linename, direction, stopsserved, numvehjour, fromto, lrseq, COUNT(DISTINCT(gtfsid)), sum(load_portion)
-		FROM linkseq_withloads
+		FROM linkseq_withloads_new
+        --FROM linkseq_withloads
 		GROUP BY lrid, tsys, linename, direction, stopsserved, numvehjour, fromto, lrseq
 	)
 	SELECT 
@@ -196,7 +316,7 @@ COMMIT;
 ---AFTER PYTHON
 --summarize and join to geometries to view
 --line level results
-CREATE TABLE loaded_links_linelevel AS(
+CREATE TABLE loaded_links_linelevel_new AS(
     WITH tblA AS(
         SELECT 
             no,
@@ -217,7 +337,7 @@ CREATE TABLE loaded_links_linelevel AS(
             fromto,
             COUNT(fromto) AS times_used,
             SUM(CAST(load_portion_avg AS numeric)) AS total_load
-        FROM loaded_links
+        FROM loaded_links_new
         WHERE tsys = 'Bus'
         OR tsys = 'Trl'
         OR tsys = 'LRT'
@@ -253,7 +373,7 @@ COMMIT;
 
 --aggregate further (and loose line level attributes) for segment level totals
 
-CREATE TABLE loaded_links_segmentlevel AS(
+CREATE TABLE loaded_links_segmentlevel_new AS(
     WITH tblA AS(
         SELECT 
             no,
@@ -268,7 +388,7 @@ CREATE TABLE loaded_links_segmentlevel AS(
             fromto,
             COUNT(fromto) AS times_used,
             SUM(CAST(load_portion_avg AS numeric)) AS total_load
-        FROM loaded_links
+        FROM loaded_links_new
         WHERE tsys = 'Bus'
         OR tsys = 'Trl'
         OR tsys = 'LRT'
