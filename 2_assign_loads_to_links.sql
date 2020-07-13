@@ -77,29 +77,34 @@ CREATE TABLE lineroutes_gtfs AS(
 COMMIT;
 
 -- divide ridership across line routes by number of vehicle journeys (evenly to start)
-CREATE TABLE lrid_portions AS(
+-- UPDATE July 7, 2020: table names with "july" at end were updated on this date to redistribute load portions considering direction
+CREATE TABLE lrid_portions_july AS(
 	WITH tblA AS(
 		SELECT 
 			linename,
+            direction,
 			CAST(SUM(numvehjour) as NUMERIC)
 		FROM lineroutes
-		GROUP BY linename
+		GROUP BY linename, direction
 		
 		),
 	tblB AS(
 		SELECT 
 			lrid,
 			linename,
+            direction,
 			CAST(numvehjour as NUMERIC)
 		FROM lineroutes
 		)
 	SELECT
 		tblB.lrid,
 		tblB.linename,
+        tblB.direction,
 		ROUND((tblB.numvehjour/tblA.sum),2) portion
 	FROM tblB
 	INNER JOIN tblA
 	ON tblA.linename = tblB.linename
+    AND tblA.direction = tblB.direction
 	WHERE tblA.sum <> 0
 	ORDER BY linename, lrid
 	);
@@ -163,7 +168,7 @@ WHERE stoppoints.fromonode = CAST(tblA.tn1 AS numeric)
 --get stoppoints ready to join to line route links with fromto field 
 --first manually updated 7 recrods; tonode field had 2 values. In each case, one was a repeat of the fromnode, so it was removed.
 --then line up stop points with links they are on and the portion of the passenger load they should receive
-CREATE TABLE linkseq_withloads_bus AS(
+CREATE TABLE linkseq_withloads_bus_july AS(
     WITH tblA AS(
         SELECT spid, gtfsid, linkno, CONCAT(fromonode, CAST(tonode AS numeric)) AS fromto
         FROM stoppoints
@@ -174,7 +179,7 @@ CREATE TABLE linkseq_withloads_bus AS(
             l.*,
             p.portion
         FROM lineroutes_linkseq l
-        INNER JOIN lrid_portions p
+        INNER JOIN lrid_portions_july p
         ON l.lrid = p.lrid
         ),
     tblC AS(
@@ -218,7 +223,7 @@ CREATE TABLE linkseq_withloads_bus AS(
 COMMIT;
 
 --repeating above for Trolleys
-CREATE TABLE linkseq_withloads_trl AS(
+CREATE TABLE linkseq_withloads_trl_july AS(
     WITH tblA AS(
         SELECT spid, gtfsid, linkno, CONCAT(fromonode, CAST(tonode AS numeric)) AS fromto
         FROM stoppoints
@@ -228,7 +233,7 @@ CREATE TABLE linkseq_withloads_trl AS(
             l.*,
             p.portion
         FROM lineroutes_linkseq l
-        INNER JOIN lrid_portions p
+        INNER JOIN lrid_portions_july p
         ON l.lrid = p.lrid
         ),
     tblC AS(
@@ -271,12 +276,12 @@ CREATE TABLE linkseq_withloads_trl AS(
     );
 COMMIT;
 
-CREATE TABLE linkseq_withloads_new AS(
+CREATE TABLE linkseq_withloads_july AS(
     SELECT *
-    FROM linkseq_withloads_bus
+    FROM linkseq_withloads_bus_july
     UNION ALL
     SELECT *
-    FROM linkseq_withloads_trl
+    FROM linkseq_withloads_trl_july
     );
 COMMIT;
 
@@ -286,11 +291,11 @@ COMMIT;
 
 --clean up repeats from links that have multiple stops (average loads)
 --requires losing detail on gtfsid, but can always get it from the previous table
-CREATE TABLE linkseq_cleanloads_new AS(
+CREATE TABLE linkseq_cleanloads_july AS(
 --CREATE TABLE linkseq_cleanloads AS(
 	WITH tblA AS(
 		SELECT lrid, tsys, linename, direction, stopsserved, numvehjour, fromto, lrseq, COUNT(DISTINCT(gtfsid)), sum(load_portion)
-		FROM linkseq_withloads_new
+		FROM linkseq_withloads_july
         --FROM linkseq_withloads
 		GROUP BY lrid, tsys, linename, direction, stopsserved, numvehjour, fromto, lrseq
 	)
@@ -316,7 +321,7 @@ COMMIT;
 ---AFTER PYTHON
 --summarize and join to geometries to view
 --line level results
-CREATE TABLE loaded_links_linelevel_new AS(
+CREATE TABLE loaded_links_linelevel_july AS(
     WITH tblA AS(
         SELECT 
             no,
@@ -337,7 +342,7 @@ CREATE TABLE loaded_links_linelevel_new AS(
             fromto,
             COUNT(fromto) AS times_used,
             SUM(CAST(load_portion_avg AS numeric)) AS total_load
-        FROM loaded_links_new
+        FROM loaded_links_july
         WHERE tsys = 'Bus'
         OR tsys = 'Trl'
         OR tsys = 'LRT'
@@ -373,7 +378,7 @@ COMMIT;
 
 --aggregate further (and loose line level attributes) for segment level totals
 
-CREATE TABLE loaded_links_segmentlevel_new AS(
+CREATE TABLE loaded_links_segmentlevel_july AS(
     WITH tblA AS(
         SELECT 
             no,
@@ -388,7 +393,7 @@ CREATE TABLE loaded_links_segmentlevel_new AS(
             fromto,
             COUNT(fromto) AS times_used,
             SUM(CAST(load_portion_avg AS numeric)) AS total_load
-        FROM loaded_links_new
+        FROM loaded_links_july
         WHERE tsys = 'Bus'
         OR tsys = 'Trl'
         OR tsys = 'LRT'
@@ -415,3 +420,75 @@ CREATE TABLE loaded_links_segmentlevel_new AS(
             AS geometry
     FROM tblC);
 COMMIT;
+
+---segment level totals with split from/to to allow for summing directionsal segment level loads
+--added 01/06/20 to help Al with Frankford Ave project mapping
+--updated 07/07/2020
+CREATE TABLE loaded_links_segmentlevel_test_july AS(
+    WITH tblA AS(
+        SELECT 
+            no,
+            CAST(fromnodeno AS text),
+            CAST(tonodeno AS text),
+            CONCAT(CAST(fromnodeno AS text), CAST(tonodeno AS text)) AS fromto,
+            r_no,
+            CONCAT(CAST("r_fromno~1" AS text), CAST(r_tonodeno AS text)) AS r_fromto,
+            CAST("r_fromno~1" AS text) AS r_from,
+            CAST(r_tonodeno AS text) AS r_to,
+            geom
+        FROM "2015base_link"
+        ),
+    tblB AS(
+        SELECT
+            fromto,
+            COUNT(fromto) AS times_used,
+            SUM(CAST(load_portion_avg AS numeric)) AS total_load
+        FROM loaded_links_july
+        WHERE tsys = 'Bus'
+        OR tsys = 'Trl'
+        OR tsys = 'LRT'
+        GROUP BY fromto
+        ),
+    tblC AS(
+        SELECT
+            b.*,
+            a.no,
+            a.fromnodeno,
+            a.tonodeno,
+            --a.r_no,
+            --a.r_from,
+            --a.r_to,
+            a.geom,
+            aa.r_no,
+            aa.r_from,
+            aa.r_to,
+            aa.geom AS geom2
+        FROM tblB b
+        LEFT JOIN tblA a
+        ON b.fromto = a.fromto
+        LEFT JOIN tblA aa
+        ON b.fromto = aa.r_fromto
+    )
+    SELECT
+        fromto,
+        CASE WHEN no IS NULL THEN r_no
+	    ELSE no
+	    END
+	    AS linkno,
+        CASE WHEN fromnodeno IS NULL THEN r_from
+	    ELSE fromnodeno
+	    END
+	    AS fromnodeno,
+        CASE WHEN tonodeno IS NULL THEN r_to
+	    ELSE tonodeno
+	    END
+	    AS tonodeno,	    
+        times_used,
+        ROUND(total_load,0),
+        CASE WHEN geom IS NULL THEN geom2
+            ELSE geom
+            END
+            AS geometry
+    FROM tblC);
+COMMIT;
+
