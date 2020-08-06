@@ -1,6 +1,6 @@
 --this is script 2, which calls for script 3 to be run in the middle
 --this script assigns loads to model links in sql
-
+'''
 --messing
 WITH tblA AS(
 SELECT lrid, tsys, UNNEST(fromnodeseq) AS fromn, UNNEST(tonodeseq) AS ton
@@ -14,6 +14,7 @@ FROM tblA
 SELECT spid, gtfsid, linkno, fromonode, int(stoppoints.tonode)
 FROM stoppoints
 WHERE gtfsid <> 0
+'''
 
 -- need rank column for line routes to use a number to identify the fromto links in order for each line route
 -- need to create an unnested intermediate table, then can add a new SERIAL identifier which will be in the correct order (call it order)
@@ -78,7 +79,9 @@ COMMIT;
 
 -- divide ridership across line routes by number of vehicle journeys (evenly to start)
 -- UPDATE July 7, 2020: table names with "july" at end were updated on this date to redistribute load portions considering direction
-CREATE TABLE lrid_portions_july AS(
+-- UPDATE August 6, 2020: table names with "rider2019" at end were updated to incorporate spring 2019 bus and spring 2018 trolley ridership from SEPTA (downloaded on 8/6/20)
+
+CREATE TABLE lrid_portions_rider2019 AS(
 	WITH tblA AS(
 		SELECT 
 			linename,
@@ -168,7 +171,7 @@ WHERE stoppoints.fromonode = CAST(tblA.tn1 AS numeric)
 --get stoppoints ready to join to line route links with fromto field 
 --first manually updated 7 recrods; tonode field had 2 values. In each case, one was a repeat of the fromnode, so it was removed.
 --then line up stop points with links they are on and the portion of the passenger load they should receive
-CREATE TABLE linkseq_withloads_bus_july AS(
+CREATE TABLE linkseq_withloads_bus_rider2019 AS(
     WITH tblA AS(
         SELECT spid, gtfsid, linkno, CONCAT(fromonode, CAST(tonode AS numeric)) AS fromto
         FROM stoppoints
@@ -179,7 +182,7 @@ CREATE TABLE linkseq_withloads_bus_july AS(
             l.*,
             p.portion
         FROM lineroutes_linkseq l
-        INNER JOIN lrid_portions_july p
+        INNER JOIN lrid_portions_rider2019 p
         ON l.lrid = p.lrid
         ),
     tblC AS(
@@ -206,7 +209,7 @@ CREATE TABLE linkseq_withloads_bus_july AS(
         ),
     tblD AS(
         SELECT *
-        FROM surfacetransit_loads
+        FROM surfacetransit_loads_2019
         WHERE weekday_lo > 0
         )
     SELECT
@@ -223,7 +226,7 @@ CREATE TABLE linkseq_withloads_bus_july AS(
 COMMIT;
 
 --repeating above for Trolleys
-CREATE TABLE linkseq_withloads_trl_july AS(
+CREATE TABLE linkseq_withloads_trl_rider2019 AS(
     WITH tblA AS(
         SELECT spid, gtfsid, linkno, CONCAT(fromonode, CAST(tonode AS numeric)) AS fromto
         FROM stoppoints
@@ -233,7 +236,7 @@ CREATE TABLE linkseq_withloads_trl_july AS(
             l.*,
             p.portion
         FROM lineroutes_linkseq l
-        INNER JOIN lrid_portions_july p
+        INNER JOIN lrid_portions_rider2019 p
         ON l.lrid = p.lrid
         ),
     tblC AS(
@@ -260,7 +263,7 @@ CREATE TABLE linkseq_withloads_trl_july AS(
         ),
     tblD AS(
         SELECT *
-        FROM surfacetransit_loads
+        FROM surfacetransit_loads_2019
         WHERE weekday_lo > 0
         )
     SELECT
@@ -276,12 +279,12 @@ CREATE TABLE linkseq_withloads_trl_july AS(
     );
 COMMIT;
 
-CREATE TABLE linkseq_withloads_july AS(
+CREATE TABLE linkseq_withloads_rider2019 AS(
     SELECT *
-    FROM linkseq_withloads_bus_july
+    FROM linkseq_withloads_bus_rider2019
     UNION ALL
     SELECT *
-    FROM linkseq_withloads_trl_july
+    FROM linkseq_withloads_trl_rider2019
     );
 COMMIT;
 
@@ -291,11 +294,11 @@ COMMIT;
 
 --clean up repeats from links that have multiple stops (average loads)
 --requires losing detail on gtfsid, but can always get it from the previous table
-CREATE TABLE linkseq_cleanloads_july AS(
+CREATE TABLE linkseq_cleanloads_rider2019 AS(
 --CREATE TABLE linkseq_cleanloads AS(
 	WITH tblA AS(
 		SELECT lrid, tsys, linename, direction, stopsserved, numvehjour, fromto, lrseq, COUNT(DISTINCT(gtfsid)), sum(load_portion)
-		FROM linkseq_withloads_july
+		FROM linkseq_withloads_rider2019
         --FROM linkseq_withloads
 		GROUP BY lrid, tsys, linename, direction, stopsserved, numvehjour, fromto, lrseq
 	)
@@ -315,13 +318,14 @@ CREATE TABLE linkseq_cleanloads_july AS(
 	);
 COMMIT;
 
+--************************************************--------
 --now assign loads to links between stop points in Python
 --using script: fill_in_linkloads.py
 
 ---AFTER PYTHON
 --summarize and join to geometries to view
 --line level results
-CREATE TABLE loaded_links_linelevel_july AS(
+CREATE TABLE loaded_links_linelevel_rider2019 AS(
     WITH tblA AS(
         SELECT 
             no,
@@ -342,7 +346,7 @@ CREATE TABLE loaded_links_linelevel_july AS(
             fromto,
             COUNT(fromto) AS times_used,
             SUM(CAST(load_portion_avg AS numeric)) AS total_load
-        FROM loaded_links_july
+        FROM loaded_links_rider2019
         WHERE tsys = 'Bus'
         OR tsys = 'Trl'
         OR tsys = 'LRT'
@@ -378,7 +382,7 @@ COMMIT;
 
 --aggregate further (and loose line level attributes) for segment level totals
 
-CREATE TABLE loaded_links_segmentlevel_july AS(
+CREATE TABLE loaded_links_segmentlevel_rider2019 AS(
     WITH tblA AS(
         SELECT 
             no,
@@ -393,7 +397,7 @@ CREATE TABLE loaded_links_segmentlevel_july AS(
             fromto,
             COUNT(fromto) AS times_used,
             SUM(CAST(load_portion_avg AS numeric)) AS total_load
-        FROM loaded_links_july
+        FROM loaded_links_rider2019
         WHERE tsys = 'Bus'
         OR tsys = 'Trl'
         OR tsys = 'LRT'
@@ -424,7 +428,7 @@ COMMIT;
 ---segment level totals with split from/to to allow for summing directionsal segment level loads
 --added 01/06/20 to help Al with Frankford Ave project mapping
 --updated 07/07/2020
-CREATE TABLE loaded_links_segmentlevel_test_july AS(
+CREATE TABLE loaded_links_segmentlevel_test_rider2019 AS(
     WITH tblA AS(
         SELECT 
             no,
@@ -443,7 +447,7 @@ CREATE TABLE loaded_links_segmentlevel_test_july AS(
             fromto,
             COUNT(fromto) AS times_used,
             SUM(CAST(load_portion_avg AS numeric)) AS total_load
-        FROM loaded_links_july
+        FROM loaded_links_rider2019
         WHERE tsys = 'Bus'
         OR tsys = 'Trl'
         OR tsys = 'LRT'

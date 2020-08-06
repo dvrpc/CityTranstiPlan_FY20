@@ -17,7 +17,7 @@ cur = con.cursor()
 
 cur.execute("""
     SELECT *
-    FROM linkseq_cleanloads_july
+    FROM linkseq_cleanloads_rider2019
     ORDER BY lrid, lrseq
     """)
 loads = cur.fetchall()
@@ -78,5 +78,5 @@ df.columns=['lrid',
 #add to sql db
 from sqlalchemy import create_engine
 engine = create_engine('postgresql://postgres:sergt@localhost:5432/GTFS')
-df.to_sql('loaded_links_july', engine, chunksize = 10000)
+df.to_sql('loaded_links_rider2019', engine, chunksize = 10000)
 
